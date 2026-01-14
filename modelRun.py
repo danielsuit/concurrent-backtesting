@@ -58,18 +58,35 @@ def preprocess_data(df, feature_cols, target_col, sequence_length=30):
         y_sequences.append(y[i+sequence_length])
     
     return np.array(X_sequences), np.array(y_sequences)
-def run_model_comparison(data_path, model1_path, model2_path):
+
+def preprocess_linear_data(df, sequence_length=30):
+    """Preprocess data for linear model (log-returns)"""
+    df_copy = df.copy()
+    df_copy["log_close"] = np.log(df_copy["Close"])
+    df_copy["y"] = df_copy["log_close"].shift(-1) - df_copy["log_close"]
+    
+    # Simple lag features
+    for k in [1, 2, 3, 5]:
+        df_copy[f"ret_lag_{k}"] = df_copy["log_close"].diff(k)
+    
+    # Drop NAs
+    df_copy = df_copy.dropna()
+    
+    feature_cols = [c for c in df_copy.columns if c.startswith("ret_lag_")]
+    X = df_copy[feature_cols].values.astype('float32')
+    y = df_copy["y"].values.astype('float32')
+    
+    return X, y
+def run_model_comparison(data_path, model1_path, model2_path, max_samples=10):
     # Load data
     df = load_data(data_path)
-    feature_cols_lstm = ['Open', 'Close', 'High', 'Low', 'Volume', 'Number Ticks']  # All 6 features for LSTM
-    feature_cols_linear = ['Open', 'Close', 'High', 'Low']  # First 4 features for linear model
-    target_col = 'Close'
     
-    # Preprocess data for LSTM
-    X_lstm, y = preprocess_data(df, feature_cols_lstm, target_col, sequence_length=30)
+    # LSTM model preprocessing
+    feature_cols_lstm = ['Open', 'High', 'Low', 'Close', 'Volume', 'Number Ticks']
+    X_lstm, y_direction = preprocess_data(df, feature_cols_lstm, 'Close', sequence_length=30)
     
-    # Preprocess data for linear model - use only last values from the LSTM sequence
-    X_linear = X_lstm[:, -1, :4]  # Take last timestep and first 4 features
+    # Linear model preprocessing
+    X_linear, y_logret = preprocess_linear_data(df)
     
     # Load models
     model1 = load_model(model1_path)
@@ -78,13 +95,27 @@ def run_model_comparison(data_path, model1_path, model2_path):
     # Initialize concurrent strategy
     strategy = ConcurrentMLStrategy(model1, model2)
     
-    # Run predictions concurrently
+    # Run predictions concurrently (limit to max_samples for testing)
     results = []
-    for i in range(len(X_lstm)):
+    num_samples = min(max_samples, len(X_lstm))
+    print(f"Running predictions on {num_samples} samples...")
+    for i in range(num_samples):
         features_lstm = X_lstm[i:i+1]  # Shape: (1, 30, 6)
-        features_linear = X_linear[i:i+1]  # Shape: (1, 4)
+        
+        # For linear model, match the index properly
+        if i < len(X_linear):
+            features_linear = X_linear[i:i+1]  # Shape: (1, 4)
+            actual_logret = y_logret[i]
+        else:
+            continue
+            
         result = strategy.predict_concurrent(features_lstm, features_linear)
+        result['actual_direction'] = y_direction[i]  # 0 or 1
+        result['actual_logret'] = actual_logret  # continuous
+        result['actual_price'] = df['Close'].iloc[i+30]  # actual price at that point
         results.append(result)
+        if (i + 1) % max(1, num_samples // 5) == 0:
+            print(f"Completed {i + 1}/{num_samples} predictions")
     
     return results
 if __name__ == "__main__":
@@ -92,8 +123,34 @@ if __name__ == "__main__":
     model1_path = "models/lstm.keras"
     model2_path = "models/regularizedLinear.keras"
     
-    results = run_model_comparison(data_path, model1_path, model2_path)
+    results = run_model_comparison(data_path, model1_path, model2_path, max_samples=5)
     
     # Print results
-    for res in results:
-        print(f"Model1 Prediction: {res['model1']}, Model2 Prediction: {res['model2']}, Latency: {res['latency_ms']:.2f} ms")
+    print("\n" + "-"*100)
+    print("MODEL PREDICTIONS COMPARISON")
+    print("-"*100)
+    print(f"{'Sample':<8} {'Price':<12} {'Direction':<12} {'LSTM Pred':<12} {'Log-Ret':<12} {'Log-Ret Pred':<14} {'Latency':<10}")
+    print(f"{'':8} {'(Actual)':<12} {'(Actual)':<12} {'(0-1)':<12} {'(Actual)':<12} {'(Predicted)':<14}")
+    print("-"*100)
+    
+    lstm_correct = 0
+    
+    for i, res in enumerate(results):
+        price = res['actual_price']
+        direction = int(res['actual_direction'])
+        actual_logret = res['actual_logret']
+        
+        lstm_pred = res['model1'].item() if isinstance(res['model1'], np.ndarray) else res['model1']
+        linear_pred = res['model2'].item() if isinstance(res['model2'], np.ndarray) else res['model2']
+        
+        # LSTM predicted direction (round to 0 or 1)
+        lstm_direction_pred = round(lstm_pred)
+        if lstm_direction_pred == direction:
+            lstm_correct += 1
+        
+        print(f"{i+1:<8} ${price:<11.4f} {direction:<12} {lstm_pred:<12.4f} {actual_logret:<12.6f} {linear_pred:<14.6f} {res['latency_ms']:<9.2f}ms")
+    
+    print("-"*100)
+    print(f"\nModel Performance Summary:")
+    print(f"LSTM Model - Direction Prediction Accuracy: {lstm_correct}/{len(results)} ({100*lstm_correct/len(results):.1f}%)")
+    print(f"Linear Model - Predicts log-returns for next bar")
