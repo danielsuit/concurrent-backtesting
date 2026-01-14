@@ -65,20 +65,24 @@ def preprocess_data(df, feature_cols, sequence_length=60):
     
     return np.array(X_sequences), np.array(y_sequences)
 
-def preprocess_linear_data(df, sequence_length=30):
-    """Preprocess data for linear model (log-returns)"""
+def preprocess_linear_data(df):
+    """Preprocess data for linear model (price prediction)"""
     df_copy = df.copy()
-    df_copy["log_close"] = np.log(df_copy["Close"])
-    df_copy["y"] = df_copy["log_close"].shift(-1) - df_copy["log_close"]
     
-    #  lag features
+    # 1-step ahead Close price target
+    df_copy["y"] = df_copy["Close"].shift(-1)
+    
+    # simple lag features (percentage changes for better scaling)
     for k in [1, 2, 3, 5]:
-        df_copy[f"ret_lag_{k}"] = df_copy["log_close"].diff(k)
+        df_copy[f"ret_lag_{k}"] = df_copy["Close"].pct_change(k)
+    
+    # add current close as a feature
+    df_copy["close_norm"] = df_copy["Close"] / df_copy["Close"].rolling(window=20).mean()
     
     # drop NAs
     df_copy = df_copy.dropna()
     
-    feature_cols = [c for c in df_copy.columns if c.startswith("ret_lag_")]
+    feature_cols = [c for c in df_copy.columns if c.startswith("ret_lag_") or c == "close_norm"]
     X = df_copy[feature_cols].values.astype('float32')
     y = df_copy["y"].values.astype('float32')
     
@@ -90,8 +94,8 @@ def run_model_comparison(data_path, model1_path, model2_path, max_samples=10):
     feature_cols_lstm = ['Open', 'High', 'Low', 'Close', 'Volume', 'Number Ticks']
     X_lstm, y_price = preprocess_data(df, feature_cols_lstm, sequence_length=60)
     
-    # linear model preprocessing
-    X_linear, y_logret = preprocess_linear_data(df)
+    # linear model preprocessing (now predicts next-bar price)
+    X_linear, y_linear = preprocess_linear_data(df)
     
     # load models
     model1 = load_model(model1_path)
@@ -116,11 +120,11 @@ def run_model_comparison(data_path, model1_path, model2_path, max_samples=10):
     for count, i in enumerate(sample_indices):
         features_lstm = X_lstm[i:i+1]
         features_linear = X_linear[i:i+1]
-        actual_logret = y_logret[i]
+        actual_linear = y_linear[i]
             
         result = strategy.predict_concurrent(features_lstm, features_linear)
-        result['actual_price'] = y_price[i]  # actual next-bar price
-        result['actual_logret'] = actual_logret  # continuous
+        result['actual_price'] = y_price[i]  # actual next-bar price (LSTM target)
+        result['actual_linear'] = actual_linear  # actual next-bar price (linear target)
         result['sample_idx'] = i  # track which index was sampled
         results.append(result)
         if (count + 1) % max(1, num_samples // 5) == 0:
@@ -133,28 +137,31 @@ if __name__ == "__main__":
     model2_path = "models/regularizedLinear.keras"
     
     results = run_model_comparison(data_path, model1_path, model2_path, max_samples=5)
-    print("\n" + "-"*120)
-    print("MODEL PREDICTIONS COMPARISON (Random Samples)")
-    print("-"*120)
-    print(f"{'Sample':<8} {'Index':<10} {'Actual Price':<14} {'LSTM Pred':<14} {'Price Error':<14} {'Log-Ret':<12} {'Log-Ret Pred':<14} {'Latency':<10}")
-    print("-"*120)
+    print("\n" + "-"*130)
+    print("MODEL PREDICTIONS COMPARISON (Random Samples) - Both Models Predict Next-Bar Price")
+    print("-"*130)
+    print(f"{'Sample':<8} {'Index':<10} {'Actual Price':<14} {'LSTM Pred':<14} {'LSTM Error':<14} {'Linear Pred':<14} {'Linear Error':<14} {'Latency':<10}")
+    print("-"*130)
     
-    price_errors = []
+    lstm_errors = []
+    linear_errors = []
     
     for i, res in enumerate(results):
         actual_price = res['actual_price']
-        actual_logret = res['actual_logret']
+        actual_linear = res['actual_linear']
         sample_idx = res['sample_idx']
         
         lstm_pred = res['model1'].item() if isinstance(res['model1'], np.ndarray) else res['model1']
         linear_pred = res['model2'].item() if isinstance(res['model2'], np.ndarray) else res['model2']
         
-        price_error = lstm_pred - actual_price
-        price_errors.append(abs(price_error))
+        lstm_error = lstm_pred - actual_price
+        linear_error = linear_pred - actual_linear
+        lstm_errors.append(abs(lstm_error))
+        linear_errors.append(abs(linear_error))
         
-        print(f"{i+1:<8} {sample_idx:<10} ${actual_price:<13.4f} ${lstm_pred:<13.4f} {price_error:>+13.4f} {actual_logret:<12.6f} {linear_pred:<14.6f} {res['latency_ms']:<9.2f}ms")
+        print(f"{i+1:<8} {sample_idx:<10} ${actual_price:<13.4f} ${lstm_pred:<13.4f} {lstm_error:>+13.4f} ${linear_pred:<13.4f} {linear_error:>+13.4f} {res['latency_ms']:<9.2f}ms")
     
-    print("-"*120)
+    print("-"*130)
     print(f"\nModel Performance Summary:")
-    print(f"LSTM Model - Mean Absolute Error: ${np.mean(price_errors):.4f}")
-    print(f"Linear Model - Predicts log-returns for next bar")
+    print(f"LSTM Model   - Mean Absolute Error: ${np.mean(lstm_errors):.4f}")
+    print(f"Linear Model - Mean Absolute Error: ${np.mean(linear_errors):.4f}")
