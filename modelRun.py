@@ -100,24 +100,31 @@ def run_model_comparison(data_path, model1_path, model2_path, max_samples=10):
     # init concurrent strategy
     strategy = ConcurrentMLStrategy(model1, model2)
     
-    # run predictions concurrently
+    # run predictions concurrently on random samples
     results = []
-    num_samples = min(max_samples, len(X_lstm))
-    print(f"Running predictions on {num_samples} samples...")
-    for i in range(num_samples):
+    
+    # get valid indices (must have both LSTM and linear data)
+    max_idx = min(len(X_lstm), len(X_linear))
+    num_samples = min(max_samples, max_idx)
+    
+    # randomly sample indices spread across the dataset
+    np.random.seed(42)  # for reproducibility
+    sample_indices = np.random.choice(max_idx, size=num_samples, replace=False)
+    sample_indices = np.sort(sample_indices)  # sort for cleaner output
+    
+    print(f"Running predictions on {num_samples} random samples across dataset...")
+    for count, i in enumerate(sample_indices):
         features_lstm = X_lstm[i:i+1]
-        if i < len(X_linear):
-            features_linear = X_linear[i:i+1]
-            actual_logret = y_logret[i]
-        else:
-            continue
+        features_linear = X_linear[i:i+1]
+        actual_logret = y_logret[i]
             
         result = strategy.predict_concurrent(features_lstm, features_linear)
         result['actual_price'] = y_price[i]  # actual next-bar price
         result['actual_logret'] = actual_logret  # continuous
+        result['sample_idx'] = i  # track which index was sampled
         results.append(result)
-        if (i + 1) % max(1, num_samples // 5) == 0:
-            print(f"Completed {i + 1}/{num_samples} predictions")
+        if (count + 1) % max(1, num_samples // 5) == 0:
+            print(f"Completed {count + 1}/{num_samples} predictions")
     
     return results
 if __name__ == "__main__":
@@ -126,19 +133,18 @@ if __name__ == "__main__":
     model2_path = "models/regularizedLinear.keras"
     
     results = run_model_comparison(data_path, model1_path, model2_path, max_samples=5)
-    
-    # Print results
-    print("\n" + "-"*110)
-    print("MODEL PREDICTIONS COMPARISON")
-    print("-"*110)
-    print(f"{'Sample':<8} {'Actual Price':<14} {'LSTM Pred':<14} {'Price Error':<14} {'Log-Ret':<12} {'Log-Ret Pred':<14} {'Latency':<10}")
-    print("-"*110)
+    print("\n" + "-"*120)
+    print("MODEL PREDICTIONS COMPARISON (Random Samples)")
+    print("-"*120)
+    print(f"{'Sample':<8} {'Index':<10} {'Actual Price':<14} {'LSTM Pred':<14} {'Price Error':<14} {'Log-Ret':<12} {'Log-Ret Pred':<14} {'Latency':<10}")
+    print("-"*120)
     
     price_errors = []
     
     for i, res in enumerate(results):
         actual_price = res['actual_price']
         actual_logret = res['actual_logret']
+        sample_idx = res['sample_idx']
         
         lstm_pred = res['model1'].item() if isinstance(res['model1'], np.ndarray) else res['model1']
         linear_pred = res['model2'].item() if isinstance(res['model2'], np.ndarray) else res['model2']
@@ -146,9 +152,9 @@ if __name__ == "__main__":
         price_error = lstm_pred - actual_price
         price_errors.append(abs(price_error))
         
-        print(f"{i+1:<8} ${actual_price:<13.4f} ${lstm_pred:<13.4f} {price_error:>+13.4f} {actual_logret:<12.6f} {linear_pred:<14.6f} {res['latency_ms']:<9.2f}ms")
+        print(f"{i+1:<8} {sample_idx:<10} ${actual_price:<13.4f} ${lstm_pred:<13.4f} {price_error:>+13.4f} {actual_logret:<12.6f} {linear_pred:<14.6f} {res['latency_ms']:<9.2f}ms")
     
-    print("-"*110)
+    print("-"*120)
     print(f"\nModel Performance Summary:")
     print(f"LSTM Model - Mean Absolute Error: ${np.mean(price_errors):.4f}")
     print(f"Linear Model - Predicts log-returns for next bar")
