@@ -121,7 +121,6 @@ def run_model_comparison(data_path, model1_path, model2_path, max_samples=10):
         features_lstm = X_lstm[i:i+1]
         features_linear = X_linear[i:i+1]
         actual_linear = y_linear[i]
-            
         result = strategy.predict_concurrent(features_lstm, features_linear)
         result['actual_price'] = y_price[i]  # actual next-bar price (LSTM target)
         result['actual_linear'] = actual_linear  # actual next-bar price (linear target)
@@ -150,15 +149,12 @@ if __name__ == "__main__":
         actual_price = res['actual_price']
         actual_linear = res['actual_linear']
         sample_idx = res['sample_idx']
-        
         lstm_pred = res['model1'].item() if isinstance(res['model1'], np.ndarray) else res['model1']
         linear_pred = res['model2'].item() if isinstance(res['model2'], np.ndarray) else res['model2']
-        
         lstm_error = lstm_pred - actual_price
         linear_error = linear_pred - actual_linear
         lstm_errors.append(abs(lstm_error))
         linear_errors.append(abs(linear_error))
-        
         print(f"{i+1:<8} {sample_idx:<10} ${actual_price:<13.4f} ${lstm_pred:<13.4f} {lstm_error:>+13.4f} ${linear_pred:<13.4f} {linear_error:>+13.4f} {res['latency_ms']:<9.2f}ms")
     
     print("-"*130)
