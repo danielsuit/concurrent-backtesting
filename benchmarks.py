@@ -1,0 +1,5 @@
+# regularized
+# MSE RMSE MAE MAPE R2
+
+#LSTM
+# RSME MAE MAPE R2
