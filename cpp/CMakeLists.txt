@@ -21,7 +21,7 @@ install(TARGETS model_run DESTINATION bin)
 
 # Add a custom target to export models
 add_custom_target(export_models
-    COMMAND python3 ${CMAKE_SOURCE_DIR}/export_models.py
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/../training/export_models.py
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/../training
     COMMENT "Exporting Python models to JSON format"
 )

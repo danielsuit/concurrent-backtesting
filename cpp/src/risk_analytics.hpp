@@ -11,7 +11,6 @@
 #include <iostream>
 
 namespace analytics {
-
 struct ReturnDistribution {
     double mean = 0;
     double std = 0;
@@ -132,11 +131,9 @@ public:
             dist.skewness = sum3 / n;
             dist.excessKurtosis = sum4 / n - 3.0;
         }
-        
         dist.min = *std::min_element(returns.begin(), returns.end());
         dist.max = *std::max_element(returns.begin(), returns.end());
         dist.median = percentile(returns, 50);
-        
         int positive = 0, negative = 0;
         for (double r : returns) {
             if (r > 0) positive++;
@@ -144,10 +141,8 @@ public:
         }
         dist.positiveReturnsPct = 100.0 * positive / n;
         dist.negativeReturnsPct = 100.0 * negative / n;
-        
         return dist;
     }
-    
     static std::vector<double> computeEquityCurve(const std::vector<double>& returns) {
         std::vector<double> equity(returns.size() + 1, 1.0);
         for (size_t i = 0; i < returns.size(); i++) {
@@ -159,11 +154,9 @@ public:
     static DrawdownAnalysis computeDrawdowns(const std::vector<double>& equityCurve) {
         DrawdownAnalysis dd;
         if (equityCurve.empty()) return dd;
-        
         size_t n = equityCurve.size();
         std::vector<double> runningMax(n);
         std::vector<double> drawdowns(n);
-        
         runningMax[0] = equityCurve[0];
         for (size_t i = 1; i < n; i++) {
             runningMax[i] = std::max(runningMax[i-1], equityCurve[i]);
@@ -206,11 +199,9 @@ public:
         return dd;
     }
     
-    static PathDependentMetrics computePathMetrics(const std::vector<double>& returns,
-                                                    const std::vector<double>& equityCurve) {
+    static PathDependentMetrics computePathMetrics(const std::vector<double>& returns, const std::vector<double>& equityCurve) {
         PathDependentMetrics pm;
         if (returns.empty()) return pm;
-        
         size_t n = returns.size();
         
         // Total and annualized return
@@ -244,8 +235,7 @@ public:
         pm.winRatePct = pm.winRate * 100;
         pm.avgWin = pm.nWins > 0 ? sumWins / pm.nWins : 0;
         pm.avgLoss = pm.nLosses > 0 ? sumLosses / pm.nLosses : 0;
-        pm.profitFactor = sumLosses != 0 ? sumWins / std::abs(sumLosses) : 
-                          (sumWins > 0 ? std::numeric_limits<double>::infinity() : 0);
+        pm.profitFactor = sumLosses != 0 ? sumWins / std::abs(sumLosses) : (sumWins > 0 ? std::numeric_limits<double>::infinity() : 0);
         pm.expectancy = pm.winRate * pm.avgWin + (1 - pm.winRate) * pm.avgLoss;
         
         // VaR and CVaR
@@ -266,8 +256,7 @@ public:
         return pm;
     }
     
-    static PredictionAccuracy computePredictionAccuracy(const std::vector<double>& predictions,
-                                                         const std::vector<double>& actuals) {
+    static PredictionAccuracy computePredictionAccuracy(const std::vector<double>& predictions, const std::vector<double>& actuals) {
         PredictionAccuracy pa;
         if (predictions.empty() || predictions.size() != actuals.size()) return pa;
         

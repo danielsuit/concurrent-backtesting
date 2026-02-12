@@ -7,26 +7,21 @@
 #include <string>
 #include <algorithm>
 #include <random>
-
 #include "json_parser.hpp"
 #include "models.hpp"
 #include "data_loader.hpp"
 #include "risk_analytics.hpp"
-
 using namespace models;
 using namespace data;
 using namespace analytics;
-
 // =============================================================================
 // CONCURRENT MODEL EXECUTION
 // =============================================================================
-
 class ConcurrentMLStrategy {
 public:
     LinearModel linearModel;
     LSTMModel lstmModel;
     bool hasLSTM = false;
-    
     ConcurrentMLStrategy(const std::string& linearModelPath, const std::string& lstmModelPath = "") {
         std::cout << "Loading linear model from: " << linearModelPath << "\n";
         linearModel = LinearModel::loadFromJson(linearModelPath);
@@ -55,26 +50,19 @@ public:
             }
         }
     }
-    
     struct PredictionResult {
         double linearPred = 0;
         double lstmPred = 0;
         double latencyMs = 0;
         bool hasLSTM = false;
     };
-    
     // Subsample stride: 1=full sequence, 4=25% of timesteps, 10=10% of timesteps
     int lstmSubsampleStride = 4;  // Process every 4th timestep for ~4x speedup
-    
     void setSubsampleStride(int stride) { lstmSubsampleStride = stride; }
-    
-    PredictionResult predictConcurrent(const std::vector<double>& linearFeatures,
-                                        const std::vector<std::vector<double>>& lstmSequence = {}) {
+    PredictionResult predictConcurrent(const std::vector<double>& linearFeatures, const std::vector<std::vector<double>>& lstmSequence = {}) {
         auto start = std::chrono::high_resolution_clock::now();
-        
         PredictionResult result;
         result.hasLSTM = hasLSTM && !lstmSequence.empty();
-        
         if (result.hasLSTM) {
             // Run both models concurrently
             auto linearFuture = std::async(std::launch::async, [&]() {
@@ -98,23 +86,14 @@ public:
         return result;
     }
 };
-
-// =============================================================================
-// MAIN PROGRAM
-// =============================================================================
-
 int main(int argc, char* argv[]) {
-    std::cout << "=============================================================================\n";
     std::cout << "CONCURRENT ML BACKTESTING ENGINE (C++)\n";
-    std::cout << "=============================================================================\n\n";
-    
     // Configuration
     std::string dataPath = "../../../desktop/quant/hist/aaplIntra.csv";
-    std::string linearModelPath = "models/elasticNet.json";
-    std::string lstmModelPath = "models/lstm.json";
+    std::string linearModelPath = "training/models/elasticNet.json";
+    std::string lstmModelPath = "training/models/lstm.json";
     int maxSamples = 100;
     int subsampleStride = 4;  // Default: process every 4th LSTM timestep
-    
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -138,19 +117,15 @@ int main(int argc, char* argv[]) {
             return 0;
         }
     }
-    
     try {
         // Load data
         std::cout << "Loading data from: " << dataPath << "\n";
         auto df = DataFrame::fromCSV(dataPath);
         std::cout << "  Rows: " << df.nRows() << ", Columns: " << df.nCols() << "\n\n";
-        
         // Prepare features
         std::cout << "Preparing features...\n";
         auto linearFeatures = LinearFeatures::fromDataFrame(df);
-        std::cout << "  Linear features: " << linearFeatures.X.size() << " samples, " 
-                  << (linearFeatures.X.empty() ? 0 : linearFeatures.X[0].size()) << " features\n";
-        
+        std::cout << "  Linear features: " << linearFeatures.X.size() << " samples, " << (linearFeatures.X.empty() ? 0 : linearFeatures.X[0].size()) << " features\n";
         // Prepare LSTM features
         LSTMFeatures lstmFeatures;
         try {
@@ -159,45 +134,35 @@ int main(int argc, char* argv[]) {
         } catch (const std::exception& e) {
             std::cerr << "  Warning: Could not prepare LSTM features: " << e.what() << "\n";
         }
-        
         // Load models
         std::cout << "\nLoading models...\n";
         ConcurrentMLStrategy strategy(linearModelPath, lstmModelPath);
         strategy.setSubsampleStride(subsampleStride);
-        std::cout << "  LSTM subsample stride: " << subsampleStride 
-                  << " (processing 1/" << subsampleStride << " timesteps)\n";
+        std::cout << "  LSTM subsample stride: " << subsampleStride << " (processing 1/" << subsampleStride << " timesteps)\n";
         
         // Sample indices
-        int maxIdx = static_cast<int>(std::min(linearFeatures.X.size(), 
-                                                lstmFeatures.X.empty() ? linearFeatures.X.size() : lstmFeatures.X.size()));
+        int maxIdx = static_cast<int>(std::min(linearFeatures.X.size(), lstmFeatures.X.empty() ? linearFeatures.X.size() : lstmFeatures.X.size()));
         int numSamples = std::min(maxSamples, maxIdx);
-        
         std::vector<int> sampleIndices(maxIdx);
         std::iota(sampleIndices.begin(), sampleIndices.end(), 0);
-        
         std::mt19937 rng(42);
         std::shuffle(sampleIndices.begin(), sampleIndices.end(), rng);
         sampleIndices.resize(numSamples);
         std::sort(sampleIndices.begin(), sampleIndices.end());
-        
         // Run predictions
         std::cout << "\nRunning predictions on " << numSamples << " samples...\n\n";
-        
         std::vector<double> linearPredictions;
         std::vector<double> lstmPredictions;
         std::vector<double> actuals;
         std::vector<double> prices;
         std::vector<double> latencies;
-        
         for (int idx : sampleIndices) {
             auto& linearX = linearFeatures.X[idx];
             std::vector<std::vector<double>> lstmX;
             if (!lstmFeatures.X.empty() && idx < static_cast<int>(lstmFeatures.X.size())) {
                 lstmX = lstmFeatures.X[idx];
             }
-            
             auto result = strategy.predictConcurrent(linearX, lstmX);
-            
             linearPredictions.push_back(result.linearPred);
             actuals.push_back(linearFeatures.y[idx]);
             prices.push_back(linearFeatures.prices[idx]);
@@ -212,33 +177,21 @@ int main(int argc, char* argv[]) {
         std::cout << std::string(110, '-') << "\n";
         std::cout << "MODEL PREDICTIONS COMPARISON\n";
         std::cout << std::string(110, '-') << "\n";
-        std::cout << std::left << std::setw(8) << "Sample"
-                  << std::setw(14) << "Actual Price"
-                  << std::setw(14) << "Linear Pred"
-                  << std::setw(14) << "Linear Error";
-        
+        std::cout << std::left << std::setw(8) << "Sample" << std::setw(14) << "Actual Price" << std::setw(14) << "Linear Pred" << std::setw(14) << "Linear Error";
         if (!lstmPredictions.empty()) {
-            std::cout << std::setw(14) << "LSTM Pred"
-                      << std::setw(14) << "LSTM Error";
+            std::cout << std::setw(14) << "LSTM Pred" << std::setw(14) << "LSTM Error";
         }
         std::cout << std::setw(12) << "Latency" << "\n";
         std::cout << std::string(110, '-') << "\n";
-        
-        // Print first 10 samples
         int displayCount = std::min(10, numSamples);
         for (int i = 0; i < displayCount; i++) {
             double linearError = linearPredictions[i] - actuals[i];
-            
             std::cout << std::fixed << std::setprecision(4);
-            std::cout << std::left << std::setw(8) << (i + 1)
-                      << "$" << std::setw(13) << actuals[i]
-                      << "$" << std::setw(13) << linearPredictions[i]
-                      << std::setw(14) << linearError;
+            std::cout << std::left << std::setw(8) << (i + 1) << "$" << std::setw(13) << actuals[i] << "$" << std::setw(13) << linearPredictions[i] << std::setw(14) << linearError;
             
             if (!lstmPredictions.empty()) {
                 double lstmError = lstmPredictions[i] - actuals[i];
-                std::cout << "$" << std::setw(13) << lstmPredictions[i]
-                          << std::setw(14) << lstmError;
+                std::cout << "$" << std::setw(13) << lstmPredictions[i] << std::setw(14) << lstmError;
             }
             std::cout << std::setw(10) << latencies[i] << "ms\n";
         }
@@ -247,8 +200,6 @@ int main(int argc, char* argv[]) {
             std::cout << "... (" << (numSamples - displayCount) << " more samples)\n";
         }
         std::cout << std::string(110, '-') << "\n";
-        
-        // Compute and print diagnostics
         std::cout << "\n";
         
         auto linearDiag = RiskAnalytics::computeFullDiagnostics(
@@ -265,16 +216,13 @@ int main(int argc, char* argv[]) {
                 "LSTM_Model", lstmPredictions, actuals, prices);
             RiskAnalytics::printDiagnostics(lstmDiag);
         }
-        
         // Summary statistics
         std::cout << "\n" << std::string(100, '=') << "\n";
         std::cout << "PERFORMANCE SUMMARY\n";
         std::cout << std::string(100, '=') << "\n";
-        
         double avgLatency = RiskAnalytics::mean(latencies);
         double maxLatency = *std::max_element(latencies.begin(), latencies.end());
         double minLatency = *std::min_element(latencies.begin(), latencies.end());
-        
         std::cout << std::fixed << std::setprecision(4);
         std::cout << "Linear Model MAE: $" << linearDiag.predAccuracy.mae << "\n";
         std::cout << "Linear Model RMSE: $" << linearDiag.predAccuracy.rmse << "\n";
@@ -283,14 +231,11 @@ int main(int argc, char* argv[]) {
         std::cout << "  Average: " << avgLatency << " ms\n";
         std::cout << "  Min: " << minLatency << " ms\n";
         std::cout << "  Max: " << maxLatency << " ms\n";
-        
         std::cout << "\n" << std::string(100, '=') << "\n";
         std::cout << "Backtesting complete!\n";
-        
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
-    
     return 0;
 }

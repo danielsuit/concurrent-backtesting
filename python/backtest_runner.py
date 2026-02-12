@@ -289,17 +289,13 @@ class RiskAnalytics:
 
 class ResultAggregator:
     """Vectorized result aggregation for multi-strategy comparison"""
-    
     def __init__(self):
         self.strategies: Dict[str, StrategyMetrics] = {}
         self.analytics = RiskAnalytics()
-    
-    def add_strategy_results(self, name: str, predictions: np.ndarray, 
-                            actuals: np.ndarray, prices: Optional[np.ndarray] = None):
+    def add_strategy_results(self, name: str, predictions: np.ndarray, actuals: np.ndarray, prices: Optional[np.ndarray] = None):
         """Add strategy results for aggregation"""
         predictions = np.asarray(predictions, dtype=np.float64)
         actuals = np.asarray(actuals, dtype=np.float64)
-        
         # Compute simulated returns based on prediction accuracy
         # Strategy: go long if predicted price > current, else flat
         if prices is not None and len(prices) > 1:
@@ -557,8 +553,8 @@ def run_model_comparison(data_path, model1_path, model2_path, max_samples=10):
     return results, price_series
 if __name__ == "__main__":
     data_path = "../../../desktop/quant/hist/aaplIntra.csv"
-    model1_path = "models/lstm.keras"
-    model2_path = "models/regularizedLinear.keras"
+    model1_path = "training/models/lstm.keras"
+    model2_path = "training/models/regularizedLinear.keras"
     
     results, price_series = run_model_comparison(data_path, model1_path, model2_path, max_samples=100)
     
