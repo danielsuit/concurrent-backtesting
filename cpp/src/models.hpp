@@ -286,7 +286,6 @@ public:
         
         for (int j = 0; j < layer.outputSize; j++) {
             double sum = layer.b[j];
-            const double* w = layer.W[0].data() + j;  // First row, j-th element
             for (int i = 0; i < inSize; i++) {
                 sum += layer.W[i][j] * input[i];
             }

@@ -89,9 +89,9 @@ public:
 int main(int argc, char* argv[]) {
     std::cout << "CONCURRENT ML BACKTESTING ENGINE (C++)\n";
     // Configuration
-    std::string dataPath = "../../../desktop/quant/hist/aaplIntra.csv";
-    std::string linearModelPath = "training/models/elasticNet.json";
-    std::string lstmModelPath = "training/models/lstm.json";
+    std::string dataPath = "../../../../desktop/quant/hist/aaplIntra.csv";
+    std::string linearModelPath = "../training/models/elasticNet.json";
+    std::string lstmModelPath = "../training/models/lstm.json";
     int maxSamples = 100;
     int subsampleStride = 4;  // Default: process every 4th LSTM timestep
     // Parse command line arguments

@@ -254,7 +254,6 @@ struct LSTMFeatures {
         LSTMFeatures features;
         
         size_t n = df.nRows();
-        size_t nFeatures = featureCols.size();
         
         // Get feature columns
         std::vector<const std::vector<double>*> cols;
