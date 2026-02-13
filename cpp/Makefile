@@ -1,6 +1,6 @@
 CXX = clang++
-CXXFLAGS = -std=c++17 -O3 -march=native -Wall
-LDFLAGS = -pthread
+CXXFLAGS = -std=c++17 -O3 -march=native -Wall -flto
+LDFLAGS = -pthread -flto
 
 SRC_DIR = src
 TARGET = model_run

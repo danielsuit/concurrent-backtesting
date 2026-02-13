@@ -250,7 +250,7 @@ struct LSTMFeatures {
     std::vector<double> y;
     std::vector<double> prices;
     
-    static LSTMFeatures fromDataFrame(const DataFrame& df, int sequenceLength = 60, const std::vector<std::string>& featureCols = {"Open", "High", "Low", "Close", "Volume"}) {
+    static LSTMFeatures fromDataFrame(const DataFrame& df, int sequenceLength = 600, const std::vector<std::string>& featureCols = {"Open", "High", "Low", "Close", "Volume", "Number Ticks"}) {
         LSTMFeatures features;
         
         size_t n = df.nRows();

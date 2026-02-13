@@ -41,10 +41,17 @@ def export_keras_lstm(model_path: str, output_path: str):
     for i, layer in enumerate(model.layers):
         layer_weights = layer.get_weights()
         if layer_weights:
-            weights[f"layer_{i}_{layer.name}"] = {
+            layer_info = {
                 'type': layer.__class__.__name__,
                 'weights': [w.tolist() for w in layer_weights]
             }
+            # Add LSTM-specific config
+            if hasattr(layer, 'return_sequences'):
+                layer_info['return_sequences'] = layer.return_sequences
+            # Add Dense activation config
+            if hasattr(layer, 'activation'):
+                layer_info['activation'] = layer.activation.__name__
+            weights[f"layer_{i}_{layer.name}"] = layer_info
     config = {
         'input_shape': list(model.input_shape[1:]),
         'output_shape': list(model.output_shape[1:]) if model.output_shape[1:] else [1],

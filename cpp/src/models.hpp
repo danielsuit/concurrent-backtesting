@@ -102,6 +102,7 @@ public:
         std::vector<double> bi, bf, bc, bo;                // biases
         int inputSize = 0;
         int hiddenSize = 0;
+        bool returnSequences = false;
     };
     
     struct DenseLayer {
@@ -109,6 +110,7 @@ public:
         std::vector<double> b;
         int inputSize = 0;
         int outputSize = 0;
+        std::string activation = "linear";
     };
     std::vector<LSTMLayer> lstmLayers;
     std::vector<DenseLayer> denseLayers;
@@ -178,6 +180,10 @@ public:
                         if (static_cast<size_t>(2*layer.hiddenSize + h) < bias.size()) layer.bc[h] = bias[2*layer.hiddenSize + h].asNumber();
                         if (static_cast<size_t>(3*layer.hiddenSize + h) < bias.size()) layer.bo[h] = bias[3*layer.hiddenSize + h].asNumber();
                     }
+                    // Load return_sequences flag
+                    if (layerData.hasKey("return_sequences")) {
+                        layer.returnSequences = layerData["return_sequences"].asNumber() != 0;
+                    }
                     model.lstmLayers.push_back(std::move(layer));
                 } else if (type == "Dense" && weights.size() >= 2) {
                     DenseLayer layer;
@@ -201,6 +207,10 @@ public:
                         layer.b[j] = bias[j].asNumber();
                     }
                     
+                    // Load activation function
+                    if (layerData.hasKey("activation")) {
+                        layer.activation = layerData["activation"].asString();
+                    }
                     model.denseLayers.push_back(std::move(layer));
                 }
             }
@@ -215,68 +225,85 @@ public:
         return 1.0 / (1.0 + std::exp(-std::clamp(x, -500.0, 500.0)));
     }
     
-    static std::vector<double> processLSTMLayer(const LSTMLayer& layer, const std::vector<std::vector<double>>& sequence) {
+    // Core LSTM step computation - processes one timestep, updates h and c in-place
+    static void processLSTMStep(const LSTMLayer& layer, const std::vector<double>& x,
+                                std::vector<double>& h, std::vector<double>& c,
+                                std::vector<double>& gates) {
         const int hiddenSize = layer.hiddenSize;
         const int inputSize = layer.inputSize;
-        // Pre-allocate all vectors once
+        const int inSize = std::min(inputSize, static_cast<int>(x.size()));
+        // Initialize gates with biases
+        for (int j = 0; j < hiddenSize; j++) {
+            gates[j] = layer.bi[j];                      // i gate
+            gates[hiddenSize + j] = layer.bf[j];         // f gate
+            gates[2*hiddenSize + j] = layer.bc[j];       // c gate
+            gates[3*hiddenSize + j] = layer.bo[j];       // o gate
+        }
+        // Input contributions
+        for (int k = 0; k < inSize; k++) {
+            const double xk = x[k];
+            const double* wi = layer.Wi[k].data();
+            const double* wf = layer.Wf[k].data();
+            const double* wc = layer.Wc[k].data();
+            const double* wo = layer.Wo[k].data();
+            for (int j = 0; j < hiddenSize; j++) {
+                gates[j] += wi[j] * xk;
+                gates[hiddenSize + j] += wf[j] * xk;
+                gates[2*hiddenSize + j] += wc[j] * xk;
+                gates[3*hiddenSize + j] += wo[j] * xk;
+            }
+        }
+        // Recurrent contributions
+        for (int k = 0; k < hiddenSize; k++) {
+            const double hk = h[k];
+            const double* ui = layer.Ui[k].data();
+            const double* uf = layer.Uf[k].data();
+            const double* uc = layer.Uc[k].data();
+            const double* uo = layer.Uo[k].data();
+            for (int j = 0; j < hiddenSize; j++) {
+                gates[j] += ui[j] * hk;
+                gates[hiddenSize + j] += uf[j] * hk;
+                gates[2*hiddenSize + j] += uc[j] * hk;
+                gates[3*hiddenSize + j] += uo[j] * hk;
+            }
+        }
+        // Apply activations and compute new states
+        for (int j = 0; j < hiddenSize; j++) {
+            const double ig = sigmoid(gates[j]);
+            const double fg = sigmoid(gates[hiddenSize + j]);
+            const double c_tilde = std::tanh(std::clamp(gates[2*hiddenSize + j], -10.0, 10.0));
+            const double og = sigmoid(gates[3*hiddenSize + j]);
+            c[j] = fg * c[j] + ig * c_tilde;
+            h[j] = og * std::tanh(c[j]);
+        }
+    }
+
+    // Process LSTM layer returning only the final hidden state (return_sequences=false)
+    static std::vector<double> processLSTMLayer(const LSTMLayer& layer, const std::vector<std::vector<double>>& sequence) {
+        const int hiddenSize = layer.hiddenSize;
         std::vector<double> h(hiddenSize, 0.0);
         std::vector<double> c(hiddenSize, 0.0);
-        std::vector<double> h_new(hiddenSize);
-        std::vector<double> c_new(hiddenSize);
-        std::vector<double> gates(4 * hiddenSize);  // i, f, c_tilde, o combined
+        std::vector<double> gates(4 * hiddenSize);
         for (const auto& x : sequence) {
-            const int inSize = std::min(inputSize, static_cast<int>(x.size()));
-            // Initialize gates with biases
-            for (int j = 0; j < hiddenSize; j++) {
-                gates[j] = layer.bi[j];                      // i gate
-                gates[hiddenSize + j] = layer.bf[j];         // f gate
-                gates[2*hiddenSize + j] = layer.bc[j];       // c gate
-                gates[3*hiddenSize + j] = layer.bo[j];       // o gate
-            }
-            // Input contributions (vectorized loop)
-            for (int k = 0; k < inSize; k++) {
-                const double xk = x[k];
-                const double* wi = layer.Wi[k].data();
-                const double* wf = layer.Wf[k].data();
-                const double* wc = layer.Wc[k].data();
-                const double* wo = layer.Wo[k].data();
-                for (int j = 0; j < hiddenSize; j++) {
-                    gates[j] += wi[j] * xk;
-                    gates[hiddenSize + j] += wf[j] * xk;
-                    gates[2*hiddenSize + j] += wc[j] * xk;
-                    gates[3*hiddenSize + j] += wo[j] * xk;
-                }
-            }
-            
-            // Recurrent contributions
-            for (int k = 0; k < hiddenSize; k++) {
-                const double hk = h[k];
-                const double* ui = layer.Ui[k].data();
-                const double* uf = layer.Uf[k].data();
-                const double* uc = layer.Uc[k].data();
-                const double* uo = layer.Uo[k].data();
-                for (int j = 0; j < hiddenSize; j++) {
-                    gates[j] += ui[j] * hk;
-                    gates[hiddenSize + j] += uf[j] * hk;
-                    gates[2*hiddenSize + j] += uc[j] * hk;
-                    gates[3*hiddenSize + j] += uo[j] * hk;
-                }
-            }
-            // Apply activations and compute new states
-            for (int j = 0; j < hiddenSize; j++) {
-                const double i = sigmoid(gates[j]);
-                const double f = sigmoid(gates[hiddenSize + j]);
-                const double c_tilde = std::tanh(std::clamp(gates[2*hiddenSize + j], -10.0, 10.0));
-                const double o = sigmoid(gates[3*hiddenSize + j]);
-                c_new[j] = f * c[j] + i * c_tilde;
-                h_new[j] = o * std::tanh(c_new[j]);
-            }
-            
-            std::swap(h, h_new);
-            std::swap(c, c_new);
+            processLSTMStep(layer, x, h, c, gates);
         }
-        
         return h;
+    }
+    
+    // Process LSTM layer returning hidden states at every timestep (return_sequences=true)
+    static std::vector<std::vector<double>> processLSTMLayerSequence(
+            const LSTMLayer& layer, const std::vector<std::vector<double>>& sequence) {
+        const int hiddenSize = layer.hiddenSize;
+        std::vector<double> h(hiddenSize, 0.0);
+        std::vector<double> c(hiddenSize, 0.0);
+        std::vector<double> gates(4 * hiddenSize);
+        std::vector<std::vector<double>> output;
+        output.reserve(sequence.size());
+        for (const auto& x : sequence) {
+            processLSTMStep(layer, x, h, c, gates);
+            output.push_back(h);
+        }
+        return output;
     }
     
     static std::vector<double> processDenseLayer(const DenseLayer& layer,
@@ -289,6 +316,15 @@ public:
             for (int i = 0; i < inSize; i++) {
                 sum += layer.W[i][j] * input[i];
             }
+            // Apply activation function
+            if (layer.activation == "relu") {
+                sum = std::max(0.0, sum);
+            } else if (layer.activation == "sigmoid") {
+                sum = sigmoid(sum);
+            } else if (layer.activation == "tanh") {
+                sum = std::tanh(sum);
+            }
+            // "linear" (default) — no activation
             output[j] = sum;
         }
         
@@ -318,17 +354,21 @@ public:
         }
         
         // Subsample for faster inference (trade accuracy for speed)
-        const auto& processSeq = (subsampleStride > 1) 
+        auto currentSeq = (subsampleStride > 1) 
             ? subsampleSequence(sequence, subsampleStride) 
             : sequence;
         
-        // Process first LSTM layer
-        std::vector<double> hidden = processLSTMLayer(lstmLayers[0], processSeq);
-        
-        // Process remaining LSTM layers (stacked) - they take previous hidden as a sequence of 1
-        for (size_t i = 1; i < lstmLayers.size(); i++) {
-            std::vector<std::vector<double>> hiddenSeq = {hidden};
-            hidden = processLSTMLayer(lstmLayers[i], hiddenSeq);
+        // Process LSTM layers — intermediate layers with return_sequences=true
+        // output the full sequence of hidden states for the next layer
+        std::vector<double> hidden;
+        for (size_t i = 0; i < lstmLayers.size(); i++) {
+            if (lstmLayers[i].returnSequences) {
+                // return_sequences=true: output hidden state at every timestep
+                currentSeq = processLSTMLayerSequence(lstmLayers[i], currentSeq);
+            } else {
+                // return_sequences=false: output only the final hidden state
+                hidden = processLSTMLayer(lstmLayers[i], currentSeq);
+            }
         }
         
         // Process Dense layers

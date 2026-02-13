@@ -19,7 +19,7 @@ def load_data(path: str) -> pd.DataFrame:
     return df
 
 
-def preprocess_lstm_data(df: pd.DataFrame, feature_cols: List[str], sequence_length: int = 60) -> Tuple[np.ndarray, np.ndarray]:
+def preprocess_lstm_data(df: pd.DataFrame, feature_cols: List[str], sequence_length: int = 600) -> Tuple[np.ndarray, np.ndarray]:
     """
     Preprocess data for LSTM model (price prediction).
     
@@ -55,6 +55,7 @@ def preprocess_lstm_data(df: pd.DataFrame, feature_cols: List[str], sequence_len
 def preprocess_linear_data(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
     """
     Preprocess data for linear model (price prediction).
+    Must match the feature engineering used during training (15 features).
     
     Args:
         df: DataFrame with market data
@@ -67,17 +68,31 @@ def preprocess_linear_data(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
     # 1-step ahead Close price target
     df_copy["y"] = df_copy["Close"].shift(-1)
     
-    # Simple lag features (percentage changes for better scaling)
-    for k in [1, 2, 3, 5]:
+    # Lag returns: 1, 2, 3, 5, 10, 20
+    for k in [1, 2, 3, 5, 10, 20]:
         df_copy[f"ret_lag_{k}"] = df_copy["Close"].pct_change(k)
     
-    # Add current close as a feature
-    df_copy["close_norm"] = df_copy["Close"] / df_copy["Close"].rolling(window=20).mean()
+    # Volatility features: rolling std of returns at windows 5, 10, 20
+    daily_ret = df_copy["Close"].pct_change()
+    for w in [5, 10, 20]:
+        df_copy[f"volatility_{w}"] = daily_ret.rolling(w).std()
+    
+    # Volume features
+    df_copy["volume_norm"] = df_copy["Volume"] / df_copy["Volume"].rolling(20).mean()
+    df_copy["volume_change"] = df_copy["Volume"].pct_change()
+    
+    # Close relative to moving averages
+    for w in [5, 10, 20]:
+        df_copy[f"close_ma_{w}"] = df_copy["Close"] / df_copy["Close"].rolling(w).mean()
+    
+    # High-Low range
+    df_copy["hl_range"] = (df_copy["High"] - df_copy["Low"]) / df_copy["Close"]
     
     # Drop NAs
     df_copy = df_copy.dropna()
     
-    feature_cols = [c for c in df_copy.columns if c.startswith("ret_lag_") or c == "close_norm"]
+    feature_cols = [c for c in df_copy.columns 
+                    if c.startswith(("ret_lag_", "volatility_", "volume_", "close_ma_")) or c == "hl_range"]
     X = df_copy[feature_cols].values.astype('float32')
     y = df_copy["y"].values.astype('float32')
     

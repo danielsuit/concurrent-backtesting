@@ -1,20 +1,49 @@
 """Model loading and utilities"""
 import tensorflow as tf
 import numpy as np
+import joblib
 from typing import List, Dict, Any
 
 
-def load_model(path: str) -> tf.keras.Model:
+class SklearnModelWrapper:
+    """Wraps an sklearn model (with optional scalers) to have a Keras-compatible .predict() interface."""
+    
+    def __init__(self, model, scaler=None, y_scaler=None):
+        self.model = model
+        self.scaler = scaler
+        self.y_scaler = y_scaler
+    
+    def predict(self, X, verbose=0):
+        if self.scaler is not None:
+            X = self.scaler.transform(X)
+        y_pred = self.model.predict(X)
+        if self.y_scaler is not None:
+            y_pred = self.y_scaler.inverse_transform(y_pred.reshape(-1, 1)).ravel()
+        return y_pred.reshape(-1, 1)
+
+
+def load_model(path: str):
     """
-    Load a Keras model from file.
+    Load a model from file. Supports .keras (TF) and .joblib (sklearn).
     
     Args:
         path: Path to model file
     
     Returns:
-        Loaded Keras model
+        Loaded model with .predict() interface
     """
-    return tf.keras.models.load_model(path)
+    if path.endswith('.joblib'):
+        data = joblib.load(path)
+        if isinstance(data, dict):
+            return SklearnModelWrapper(
+                model=data['model'],
+                scaler=data.get('scaler'),
+                y_scaler=data.get('y_scaler')
+            )
+        else:
+            return SklearnModelWrapper(model=data)
+    else:
+        return tf.keras.models.load_model(path)
 
 
 def run_predictions(strategy, features_lstm: np.ndarray, features_linear: np.ndarray, 

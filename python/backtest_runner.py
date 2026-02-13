@@ -31,7 +31,7 @@ def run_model_comparison(data_path: str, model1_path: str, model2_path: str, max
     
     # LSTM model preprocessing (predicts next-bar price)
     feature_cols_lstm = ['Open', 'High', 'Low', 'Close', 'Volume', 'Number Ticks']
-    X_lstm, y_price = preprocess_lstm_data(df, feature_cols_lstm, sequence_length=60)
+    X_lstm, y_price = preprocess_lstm_data(df, feature_cols_lstm, sequence_length=600)
     
     # Linear model preprocessing (now predicts next-bar price)
     X_linear, y_linear = preprocess_linear_data(df)
@@ -64,7 +64,7 @@ def main():
     # Configuration
     data_path = "../../../../desktop/quant/hist/aaplIntra.csv"
     model1_path = "../training/models/lstm.keras"
-    model2_path = "../training/models/regularizedLinear.keras"
+    model2_path = "../training/models/elasticNet.joblib"
     
     # Run model comparison
     results, price_series = run_model_comparison(data_path, model1_path, model2_path, max_samples=100)
@@ -106,7 +106,7 @@ def main():
     )
     
     aggregator.add_strategy_results(
-        name="Regularized_Linear",
+        name="ElasticNet_Linear",
         predictions=linear_predictions,
         actuals=linear_actuals,
         prices=price_series

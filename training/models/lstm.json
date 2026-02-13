@@ -69404,7 +69404,9 @@
           0.020620547235012054,
           0.023926446214318275
         ]
-      ]
+      ],
+      "return_sequences": true,
+      "activation": "tanh"
     },
     "layer_1_lstm_21": {
       "type": "LSTM",
@@ -119207,7 +119209,9 @@
           0.1302979290485382,
           0.190093532204628
         ]
-      ]
+      ],
+      "return_sequences": false,
+      "activation": "tanh"
     },
     "layer_2_dense_20": {
       "type": "Dense",
@@ -121424,7 +121428,8 @@
           0.4068472981452942,
           -0.13196571171283722
         ]
-      ]
+      ],
+      "activation": "relu"
     },
     "layer_4_dense_21": {
       "type": "Dense",
@@ -121530,7 +121535,8 @@
         [
           31.878854751586914
         ]
-      ]
+      ],
+      "activation": "linear"
     }
   }
 }
