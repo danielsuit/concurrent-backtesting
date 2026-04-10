@@ -59,6 +59,36 @@ public:
     // Subsample stride: 1=full sequence, 4=25% of timesteps, 10=10% of timesteps
     int lstmSubsampleStride = 4;  // Process every 4th timestep for ~4x speedup
     void setSubsampleStride(int stride) { lstmSubsampleStride = stride; }
+
+    // =========================================================================
+    // PORTFOLIO MIX
+    // =========================================================================
+    struct PortfolioMix {
+        int id = 0;
+        double linearWeight = 1.0;
+        double lstmWeight = 0.0;
+        std::string name;
+
+        double blend(double linearPred, double lstmPred) const {
+            return linearWeight * linearPred + lstmWeight * lstmPred;
+        }
+    };
+
+    static std::vector<PortfolioMix> generatePortfolioMixes(int count = 100) {
+        std::vector<PortfolioMix> mixes;
+        mixes.reserve(count);
+        for (int i = 0; i < count; i++) {
+            PortfolioMix mix;
+            mix.id = i + 1;
+            mix.lstmWeight = static_cast<double>(i) / (count - 1);  // 0.0 to 1.0
+            mix.linearWeight = 1.0 - mix.lstmWeight;
+            int linearPct = static_cast<int>(std::round(mix.linearWeight * 100));
+            int lstmPct = static_cast<int>(std::round(mix.lstmWeight * 100));
+            mix.name = "Mix_" + std::to_string(mix.id) + "_L" + std::to_string(linearPct) + "_S" + std::to_string(lstmPct);
+            mixes.push_back(mix);
+        }
+        return mixes;
+    }
     PredictionResult predictConcurrent(const std::vector<double>& linearFeatures, const std::vector<std::vector<double>>& lstmSequence = {}) {
         auto start = std::chrono::high_resolution_clock::now();
         PredictionResult result;
@@ -216,6 +246,123 @@ int main(int argc, char* argv[]) {
                 "LSTM_Model", lstmPredictions, actuals, prices);
             RiskAnalytics::printDiagnostics(lstmDiag);
         }
+
+        // =================================================================
+        // PORTFOLIO MIX ANALYSIS — 100 BLENDED STRATEGIES
+        // =================================================================
+        struct PortfolioResult {
+            ConcurrentMLStrategy::PortfolioMix mix;
+            StrategyDiagnostics diag;
+        };
+        std::vector<PortfolioResult> portfolioResults;
+
+        if (!lstmPredictions.empty() && lstmPredictions.size() == linearPredictions.size()) {
+            auto mixes = ConcurrentMLStrategy::generatePortfolioMixes(100);
+
+            std::cout << "\n" << std::string(100, '=') << "\n";
+            std::cout << "PORTFOLIO MIX ANALYSIS (100 Blended Strategies)\n";
+            std::cout << std::string(100, '=') << "\n";
+            std::cout << "Evaluating 100 portfolio mixes concurrently from 100% Linear / 0% LSTM "
+                      << "to 0% Linear / 100% LSTM...\n";
+            unsigned int hwThreads = std::thread::hardware_concurrency();
+            std::cout << "  Hardware threads: " << (hwThreads > 0 ? hwThreads : 1) << "\n\n";
+
+            auto portfolioStart = std::chrono::high_resolution_clock::now();
+
+            // Launch all 100 portfolio evaluations concurrently
+            std::vector<std::future<PortfolioResult>> futures;
+            futures.reserve(mixes.size());
+            for (const auto& mix : mixes) {
+                futures.push_back(std::async(std::launch::async,
+                    [&linearPredictions, &lstmPredictions, &actuals, &prices, mix]() {
+                        std::vector<double> blendedPredictions(linearPredictions.size());
+                        for (size_t j = 0; j < linearPredictions.size(); j++) {
+                            blendedPredictions[j] = mix.blend(linearPredictions[j], lstmPredictions[j]);
+                        }
+                        auto diag = RiskAnalytics::computeFullDiagnostics(
+                            mix.name, blendedPredictions, actuals, prices);
+                        return PortfolioResult{mix, diag};
+                    }));
+            }
+
+            // Collect results
+            for (auto& f : futures) {
+                portfolioResults.push_back(f.get());
+            }
+
+            auto portfolioEnd = std::chrono::high_resolution_clock::now();
+            double portfolioMs = std::chrono::duration<double, std::milli>(portfolioEnd - portfolioStart).count();
+            std::cout << "  All 100 portfolio mixes evaluated in " << std::fixed << std::setprecision(2) << portfolioMs << " ms\n\n";
+
+            // Sort by Sharpe ratio descending
+            std::sort(portfolioResults.begin(), portfolioResults.end(),
+                [](const PortfolioResult& a, const PortfolioResult& b) {
+                    return a.diag.pathMetrics.sharpeRatio > b.diag.pathMetrics.sharpeRatio;
+                });
+
+            // Print ranked table
+            std::cout << std::left
+                      << std::setw(6)  << "Rank"
+                      << std::setw(28) << "Portfolio"
+                      << std::setw(10) << "Lin %"
+                      << std::setw(10) << "LSTM %"
+                      << std::setw(12) << "Sharpe"
+                      << std::setw(12) << "Sortino"
+                      << std::setw(14) << "Return %"
+                      << std::setw(12) << "Max DD %"
+                      << std::setw(10) << "Win %"
+                      << std::setw(10) << "R²"
+                      << "\n";
+            std::cout << std::string(124, '-') << "\n";
+
+            int displayTop = std::min(20, static_cast<int>(portfolioResults.size()));
+            for (int i = 0; i < displayTop; i++) {
+                const auto& pr = portfolioResults[i];
+                std::cout << std::fixed << std::setprecision(4)
+                          << std::left
+                          << std::setw(6)  << (i + 1)
+                          << std::setw(28) << pr.mix.name
+                          << std::setw(10) << static_cast<int>(std::round(pr.mix.linearWeight * 100))
+                          << std::setw(10) << static_cast<int>(std::round(pr.mix.lstmWeight * 100))
+                          << std::setw(12) << pr.diag.pathMetrics.sharpeRatio
+                          << std::setw(12) << pr.diag.pathMetrics.sortinoRatio
+                          << std::setw(14) << pr.diag.pathMetrics.totalReturnPct
+                          << std::setw(12) << pr.diag.drawdown.maxDrawdownPct
+                          << std::setw(10) << pr.diag.pathMetrics.winRatePct
+                          << std::setw(10) << pr.diag.predAccuracy.rSquared
+                          << "\n";
+            }
+            if (static_cast<int>(portfolioResults.size()) > displayTop) {
+                std::cout << "... (" << (portfolioResults.size() - displayTop) << " more mixes)\n";
+            }
+            std::cout << std::string(124, '-') << "\n";
+
+            // Print detailed diagnostics for the best portfolio
+            std::cout << "\n" << std::string(100, '=') << "\n";
+            std::cout << "BEST PORTFOLIO MIX DIAGNOSTICS\n";
+            std::cout << std::string(100, '=') << "\n";
+            std::cout << "Optimal blend: "
+                      << static_cast<int>(std::round(portfolioResults[0].mix.linearWeight * 100))
+                      << "% Linear + "
+                      << static_cast<int>(std::round(portfolioResults[0].mix.lstmWeight * 100))
+                      << "% LSTM\n";
+            RiskAnalytics::printDiagnostics(portfolioResults[0].diag);
+
+            // Print bottom 3 for contrast
+            std::cout << "\n  WORST 3 MIXES (for contrast):\n";
+            int worstStart = std::max(0, static_cast<int>(portfolioResults.size()) - 3);
+            for (int i = static_cast<int>(portfolioResults.size()) - 1; i >= worstStart; i--) {
+                const auto& pr = portfolioResults[i];
+                std::cout << "    " << pr.mix.name
+                          << "  Sharpe: " << pr.diag.pathMetrics.sharpeRatio
+                          << "  Return: " << pr.diag.pathMetrics.totalReturnPct << "%"
+                          << "  Max DD: " << pr.diag.drawdown.maxDrawdownPct << "%\n";
+            }
+        } else if (lstmPredictions.empty()) {
+            std::cout << "\nPortfolio mix analysis skipped (LSTM model not available).\n";
+            std::cout << "Enable LSTM with --lstm-model to test 100 portfolio blends.\n";
+        }
+
         // Summary statistics
         std::cout << "\n" << std::string(100, '=') << "\n";
         std::cout << "PERFORMANCE SUMMARY\n";

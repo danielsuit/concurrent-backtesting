@@ -220,11 +220,9 @@ public:
         
         return model;
     }
-    
     static double sigmoid(double x) {
         return 1.0 / (1.0 + std::exp(-std::clamp(x, -500.0, 500.0)));
     }
-    
     // Core LSTM step computation - processes one timestep, updates h and c in-place
     static void processLSTMStep(const LSTMLayer& layer, const std::vector<double>& x,
                                 std::vector<double>& h, std::vector<double>& c,
@@ -370,16 +368,13 @@ public:
                 hidden = processLSTMLayer(lstmLayers[i], currentSeq);
             }
         }
-        
         // Process Dense layers
         std::vector<double> output = hidden;
         for (const auto& dense : denseLayers) {
             output = processDenseLayer(dense, output);
-        }
-        
+        }   
         return output.empty() ? 0.0 : output[0];
-    }
-    
+    }   
     int getHiddenSize() const {
         return lstmLayers.empty() ? 0 : lstmLayers[0].hiddenSize;
     }
