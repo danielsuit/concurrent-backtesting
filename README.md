@@ -96,6 +96,60 @@ The C++ runner includes:
 - 100-way blended portfolio evaluation (linear/lstm weight mixes)
 - Ranked diagnostics for top blends
 
+## Testing
+
+The project includes unit tests for both the Python and C++ codebases, plus a GitHub Actions CI pipeline that runs them on every push and pull request.
+
+### Python tests (pytest)
+
+From `python/`:
+
+```bash
+pip install pytest pytest-cov
+python -m pytest tests/ -v
+```
+
+Coverage report:
+
+```bash
+python -m pytest tests/ --cov=. --cov-report=term-missing
+```
+
+Test modules:
+
+| Module | What it covers |
+|---|---|
+| `test_risk_analytics.py` | Return distributions, drawdowns, Sharpe/Sortino/VaR/CVaR, prediction accuracy, signal construction, result aggregation |
+| `test_data_preprocessing.py` | CSV loading, LSTM sequence creation, linear feature engineering (15-feature parity), dtype/NaN checks |
+| `test_model_executor.py` | Concurrent thread pool execution, latency measurement, determinism, SklearnModelWrapper scaler round-trips |
+
+### C++ tests (doctest)
+
+From `cpp/`:
+
+```bash
+make test
+```
+
+Test coverage:
+
+| Area | What it covers |
+|---|---|
+| `JsonParser` | Numbers, strings, arrays, objects, nesting, scientific notation, booleans, null |
+| `StandardScaler` / `TargetScaler` | Transform, inverse round-trip, size mismatch errors |
+| `LinearModel` | Predict with/without scalers, y\_scaler inverse, batch predict, JSON load round-trip |
+| `LSTMModel` | Sigmoid, LSTM step state updates, subsample sequence, dense layer activations (linear/relu) |
+| `DataFrame` | CSV parsing, non-numeric handling, short rows, missing files, column operations |
+| `LinearFeatures` | 15-feature output, target = next close, no inf/NaN in features |
+| `RiskAnalytics` | Mean/stddev/percentile, equity curve, drawdowns, Sharpe sign, VaR/CVaR ordering, prediction accuracy, full diagnostics |
+
+### CI/CD
+
+GitHub Actions (`.github/workflows/ci.yml`) runs both test suites automatically:
+
+- **Python**: matrix across 3.11 and 3.12
+- **C++**: builds and runs with g++ on ubuntu-latest
+
 ## Performance notes
 
 Current optimization work (see `optimization.md`) includes:
