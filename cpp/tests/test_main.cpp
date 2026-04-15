@@ -151,7 +151,8 @@ TEST_SUITE("LinearModel") {
         m.coefficients = {2.0, -1.0, 0.5};
         m.intercept = 3.0;
         m.hasScaler = false;
-        double pred = m.predict({1.0, 2.0, 4.0});
+        std::vector<double> feat = {1.0, 2.0, 4.0};
+        double pred = m.predict(feat);
         // 3 + 2*1 + (-1)*2 + 0.5*4 = 3 + 2 - 2 + 2 = 5
         CHECK(pred == doctest::Approx(5.0));
     }
@@ -163,7 +164,8 @@ TEST_SUITE("LinearModel") {
         m.hasScaler = true;
         m.scaler.mean = {10.0};
         m.scaler.scale = {2.0};
-        double pred = m.predict({14.0});
+        std::vector<double> feat = {14.0};
+        double pred = m.predict(feat);
         // scaled = (14-10)/2 = 2.0,  result = 0 + 1*2 = 2.0
         CHECK(pred == doctest::Approx(2.0));
     }
@@ -177,7 +179,8 @@ TEST_SUITE("LinearModel") {
         m.yScaler.enabled = true;
         m.yScaler.mean = 100.0;
         m.yScaler.scale = 10.0;
-        double pred = m.predict({0.5});
+        std::vector<double> feat = {0.5};
+        double pred = m.predict(feat);
         // raw = 0 + 1*0.5 = 0.5,  inverse = 0.5*10 + 100 = 105
         CHECK(pred == doctest::Approx(105.0));
     }
@@ -197,7 +200,8 @@ TEST_SUITE("LinearModel") {
         LinearModel m;
         m.coefficients = {1.0, 2.0};
         m.intercept = 0.0;
-        CHECK_THROWS(m.predict({1.0}));
+        std::vector<double> feat = {1.0};
+        CHECK_THROWS(m.predict(feat));
     }
 
     TEST_CASE("loadFromJson round-trip") {
@@ -304,7 +308,8 @@ TEST_SUITE("LSTMModel") {
 
     TEST_CASE("predict returns 0 for empty model") {
         LSTMModel m;
-        CHECK(m.predict({}) == doctest::Approx(0.0));
+        std::vector<std::vector<double>> emptySeq;
+        CHECK(m.predict(emptySeq) == doctest::Approx(0.0));
     }
 }
 
